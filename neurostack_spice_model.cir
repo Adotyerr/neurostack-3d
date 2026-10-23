@@ -1,0 +1,78 @@
+* ==============================================================================
+* NeuroStack-3D: 1S1R Memristive Synapse + Subthreshold LIF Soma SPICE Netlist
+* Compatible with LTspice, HSPICE, and Ngspice
+* ==============================================================================
+
+.title NeuroStack-3D Biomimetic Cortical Column Unit Cell
+
+* ------------------------------------------------------------------------------
+* Power Supplies & Control Voltages
+* ------------------------------------------------------------------------------
+Vdd_analog VDD_A 0 DC 0.8V
+Vdd_digital VDD_D 0 DC 0.75V
+Vrest VREST 0 DC 0.0V
+Vth VTH 0 DC 0.45V
+V_leak_bias VLEAK_BIAS 0 DC 0.65V
+
+* ------------------------------------------------------------------------------
+* Pre-Synaptic Action Potential Waveform (Wordline Input @ Tier 1)
+* Sequence of 3 pre-synaptic spikes of 1.2V amplitude, 10ns width
+* ------------------------------------------------------------------------------
+V_pre PRE_SPIKE 0 PULSE(0.0V 1.2V 10n 0.5n 0.5n 10n 40n 3)
+
+* ------------------------------------------------------------------------------
+* 1S1R Synaptic Crosspoint (OTS Selector + HfOx Memristive Core)
+* ------------------------------------------------------------------------------
+X_synapse PRE_SPIKE BITLINE_SUM 1S1R_Synapse_Cell
+
+* ------------------------------------------------------------------------------
+* Subthreshold Leaky Integrate-and-Fire (LIF) Soma (Tier 2)
+* ------------------------------------------------------------------------------
+* 1. Membrane Capacitor (C_mem = 120 fF)
+C_mem V_MEM 0 120fF IC=0.0V
+
+* 2. Synaptic Charge Injection into Soma
+R_series BITLINE_SUM V_MEM 500
+
+* 3. Subthreshold Leak Transconductor (Constant sub-nA discharge)
+M_leak V_MEM VLEAK_BIAS VREST VREST PMOS_SUB L=180n W=360n
+
+* 4. Spike Firing Comparator (Inverter Threshold Detector)
+M_comp1 SPIKE_INTERNAL V_MEM VDD_A VDD_A PMOS_SUB L=90n W=360n
+M_comp2 SPIKE_INTERNAL V_MEM 0 0 NMOS_SUB L=90n W=180n
+
+* 5. Spike Pulse Buffer (Tier 3 Output / Post-Synaptic Spike)
+M_buf1 POST_SPIKE_BAR SPIKE_INTERNAL VDD_D VDD_D PMOS_SUB L=90n W=720n
+M_buf2 POST_SPIKE_BAR SPIKE_INTERNAL 0 0 NMOS_SUB L=90n W=360n
+M_buf3 POST_SPIKE POST_SPIKE_BAR VDD_D VDD_D PMOS_SUB L=90n W=1440n
+M_buf4 POST_SPIKE POST_SPIKE_BAR 0 0 NMOS_SUB L=90n W=720n
+
+* 6. Refractory Reset Switch (Discharges C_mem back to VREST)
+M_reset V_MEM POST_SPIKE VREST VREST NMOS_SUB L=90n W=1000n
+
+* ------------------------------------------------------------------------------
+* Behavioral Subcircuit: 1S1R Synaptic Cell
+* ------------------------------------------------------------------------------
+.subckt 1S1R_Synapse_Cell TE BE
+* Internal node between Ovonic Threshold Switch (OTS) and Memristive core
+* S-type OTS Selector behavior: High resistance below V_th_ots (1.0V)
+R_ots_off TE N_INT 10MEG
+G_ots TE N_INT VALUE = { IF(abs(V(TE, N_INT)) > 1.05, V(TE, N_INT)/100, 0.0) }
+
+* Valence Change Mechanism (VCM) Memristor core:
+* Conductance modulated between G_min (10uS) and G_max (250uS)
+R_mem N_INT BE 8.2k
+.ends 1S1R_Synapse_Cell
+
+* ------------------------------------------------------------------------------
+* Simplified Subthreshold Transistor Models (90nm / 180nm CMOS)
+* ------------------------------------------------------------------------------
+.model NMOS_SUB NMOS (LEVEL=1 VTO=0.35 KP=150u GAMMA=0.2 LAMBDA=0.05)
+.model PMOS_SUB PMOS (LEVEL=1 VTO=-0.35 KP=60u GAMMA=0.2 LAMBDA=0.05)
+
+* ------------------------------------------------------------------------------
+* Simulation Controls & Transient Analysis
+* ------------------------------------------------------------------------------
+.tran 0.1n 180n 0n 0.1n
+.probe V(PRE_SPIKE) V(V_MEM) V(POST_SPIKE) I(C_mem)
+.end
